@@ -26,8 +26,13 @@ class AuditLogPlugin:
         self._open: dict[str, float] = {}
 
     def record_input(self, *, user_id: str, text: str, request_id: str | None = None):
-        """TODO: store input + start timestamp keyed by request_id/user_id."""
-        raise NotImplementedError("Implement AuditLogPlugin.record_input")
+        """Store input + start timestamp keyed by request_id/user_id."""
+        import time
+
+        key = request_id or f"{user_id}:{len(self.logs)}"
+        self._open[key] = time.time()
+        self._open[f"{key}:meta"] = {"user_id": user_id, "text": text,
+                                     "request_id": request_id, "started_at": utc_now_iso()}
 
     def record_output(
         self,
@@ -38,15 +43,30 @@ class AuditLogPlugin:
         layer: str | None = None,
         request_id: str | None = None,
     ):
-        """TODO: store output, layer decision, latency; append to self.logs."""
-        raise NotImplementedError("Implement AuditLogPlugin.record_output")
+        """Store output, layer decision, latency; append to self.logs."""
+        import time
+
+        key = request_id or f"{user_id}:{len(self.logs)}"
+        start = self._open.pop(key, None)
+        meta = self._open.pop(f"{key}:meta", {})
+        latency = (time.time() - start) if isinstance(start, float) else 0.0
+        self.logs.append({
+            "user_id": meta.get("user_id", user_id) if isinstance(meta, dict) else user_id,
+            "input": meta.get("text", "") if isinstance(meta, dict) else "",
+            "output_preview": (text or "")[:300],
+            "blocked": bool(blocked),
+            "layer": layer,
+            "latency_s": round(latency, 4),
+            "request_id": request_id,
+            "at": utc_now_iso(),
+        })
 
     def export_json(self, filepath: str | None = None):
         """Write logs to disk (JSON array) under repo-root ``outputs/`` by default."""
-        # TODO: path = filepath or default_audit_log_path()
-        #       ensure parent dirs exist, dump self.logs with indent=2
-        _ = filepath or default_audit_log_path()
-        raise NotImplementedError("Implement AuditLogPlugin.export_json")
+        path = Path(filepath or default_audit_log_path())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.logs, ensure_ascii=False, indent=2), encoding="utf-8")
+        return str(path)
 
 
 def utc_now_iso() -> str:

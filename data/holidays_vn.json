@@ -1,0 +1,13 @@
+{
+  "timezone": "Asia/Ho_Chi_Minh",
+  "dates": [
+    "2026-01-01",
+    "2026-02-16",
+    "2026-02-17",
+    "2026-02-18",
+    "2026-04-30",
+    "2026-05-01",
+    "2026-09-02"
+  ],
+  "note": "VN public holidays 2026 (subset) + weekends handled by weekday check. Format YYYY-MM-DD."
+}

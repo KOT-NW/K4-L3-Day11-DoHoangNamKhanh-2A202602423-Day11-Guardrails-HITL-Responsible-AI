@@ -45,11 +45,52 @@ class OpenAIRunner:
     client_kwargs: dict = field(default_factory=dict)
     input_hooks: list[Callable[[str], str | None]] = field(default_factory=list)
     output_hooks: list[Callable[[str], str]] = field(default_factory=list)
+    session_id: str = ""
 
     def _client(self):
+        import uuid
+
         from openai import OpenAI
 
-        return OpenAI(**(self.client_kwargs or {}))
+        kwargs = dict(self.client_kwargs or {})
+        base = str(kwargs.get("base_url") or "")
+        if "opencode.ai/zen/go" in base:
+            if not self.session_id:
+                self.session_id = str(uuid.uuid4())
+            headers = dict(kwargs.get("default_headers") or {})
+            headers.setdefault("x-opencode-session", self.session_id)
+            headers.setdefault("User-Agent", "vinbank-day11-lab/1.0")
+            kwargs["default_headers"] = headers
+        return OpenAI(**kwargs)
+
+    def _use_responses_api(self) -> bool:
+        """Zen-style gateways (opencode.ai/zen) serve some models via Responses API."""
+        base = str((self.client_kwargs or {}).get("base_url") or "")
+        model = str(self.model or "").lower()
+        return ("zen" in base or "opencode.ai" in base) and (
+            "muse-spark" in model or "muse_spark" in model
+        )
+
+    @staticmethod
+    def _responses_text(resp) -> str:
+        chunks: list[str] = []
+        for item in getattr(resp, "output", None) or []:
+            for part in getattr(item, "content", None) or []:
+                t = getattr(part, "text", None)
+                if t:
+                    chunks.append(t)
+        if chunks:
+            return "".join(chunks).strip()
+        return str(getattr(resp, "output_text", "") or "").strip()
+
+    def _chat_via_responses(self, client, agent: OpenAIAgent, user_message: str) -> str:
+        resp = client.responses.create(
+            model=self.model,
+            instructions=agent.instruction,
+            input=user_message,
+            temperature=self.temperature,
+        )
+        return self._responses_text(resp)
 
     async def chat(self, agent: OpenAIAgent, user_message: str) -> str:
         for hook in self.input_hooks:
@@ -62,15 +103,18 @@ class OpenAIRunner:
             return block_msg
 
         client = self._client()
-        completion = client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": agent.instruction},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=self.temperature,
-        )
-        text = (completion.choices[0].message.content or "").strip()
+        if self._use_responses_api():
+            text = self._chat_via_responses(client, agent, user_message)
+        else:
+            completion = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": agent.instruction},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=self.temperature,
+            )
+            text = (completion.choices[0].message.content or "").strip()
 
         for hook in self.output_hooks:
             text = hook(text)
