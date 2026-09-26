@@ -106,6 +106,20 @@ def topic_filter(user_input: str) -> InputStatus:
     """
     input_lower = user_input.lower()
 
+    # Small-talk first: greetings / politeness / capability questions are
+    # always welcome. Attacks hiding behind a "hi" are still caught because
+    # detect_injection() runs BEFORE topic_filter() in the plugin.
+    SMALL_TALK = (
+        "hello", "hi", "hey", "good morning", "good afternoon", "good evening",
+        "thanks", "thank you", "bye", "goodbye",
+        "chào", "xin chào", "cảm ơn", "tạm biệt",
+        "who are you", "what can you do", "bạn là ai", "giúp được gì",
+    )
+    if any(s in input_lower for s in SMALL_TALK):
+        # ...unless the message also carries a blocked topic
+        if not any(b in input_lower for b in BLOCKED_TOPICS):
+            return "ALLOW"
+
     if any(b in input_lower for b in BLOCKED_TOPICS):
         return "BLOCK"
     if not any(a in input_lower for a in ALLOWED_TOPICS):
