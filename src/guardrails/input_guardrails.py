@@ -69,6 +69,11 @@ def detect_injection(user_input: str) -> InputStatus:
         r"repeat\s+after\s+me|say\s+the\s+words?|output\s+(your\s+)?(config|prompt|instructions?)",
         r"role\s*play\s+as|impersonat\w+",
         r"do\s+anything\s+now|you\s+must\s+obey|disable\s+(safety|filter|guardrail)",
+        r"spac\w*\s+between\s+(each\s+)?(character|letter|char)",
+        r"letter\s+by\s+letter|character\s+by\s+character|one\s+character\s+at\s+a\s+time",
+        r"combin\w+.*(part|parties|pieces|fragments|cha[iî]ne|string)\b",
+        r"\bpart\w*\b.*combin\w+",
+        r"conserv\w+\s+(tous\s+)?les\s+tirets|preserv\w+\s+(all\s+)?(the\s+)?dashes|keep\w*\s+.*dashes",
         r"bỏ\s+qua\s+(?:mọi\s+)?hướng\s+dẫn",
         r"tiết\s+lộ\s+(?:mật\s*khẩu|api|system\s*prompt|thông\s*tin\s*nội\s*bộ)",
     ]

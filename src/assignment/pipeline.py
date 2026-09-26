@@ -56,7 +56,14 @@ def _load_holidays() -> set:
 
 def _contains_sensitive(text: str) -> bool:
     t = text or ""
-    return any(re.search(p, t, re.IGNORECASE) for p in SECRET_PATTERNS)
+    if any(re.search(p, t, re.IGNORECASE) for p in SECRET_PATTERNS):
+        return True
+    # Obfuscated secrets (spaced / dashed / homoglyph) — same needles as output filter
+    try:
+        from guardrails.output_guardrails import contains_obfuscated_secret
+        return bool(contains_obfuscated_secret(t))
+    except Exception:
+        return False
 
 
 def _now_ict(now=None) -> datetime:

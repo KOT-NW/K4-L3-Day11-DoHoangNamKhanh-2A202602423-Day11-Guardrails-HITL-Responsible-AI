@@ -6,6 +6,7 @@ Checkpoint 2 — Output Guardrails
 """
 import re
 import textwrap
+import unicodedata
 
 from google.genai import types
 from google.adk.agents import llm_agent
@@ -13,6 +14,96 @@ from google.adk import runners
 from google.adk.plugins import base_plugin
 
 from core.utils import chat_with_agent
+
+
+# ============================================================
+# Obfuscated-secret detection (spaces / dashes / homoglyphs)
+#
+# Catches "d b . v i n b a n k . i n t e r n a l", "s-k-v-i-n-...",
+# Cyrillic lookalikes (аdmin123) — normalized away before matching.
+# The redactor maps the match back to the ORIGINAL span so only the
+# secret region becomes [REDACTED].
+# ============================================================
+
+# Cyrillic + Greek lookalikes -> Latin (only letters in our needles + ports)
+_CONFUSABLES = str.maketrans({
+    "а": "a", "А": "a", "е": "e", "Е": "e", "і": "i", "І": "i",
+    "о": "o", "О": "o", "р": "p", "Р": "p", "с": "c", "С": "c",
+    "к": "k", "К": "k", "м": "m", "М": "m", "н": "n", "Н": "n",
+    "т": "t", "Т": "t", "х": "x", "Х": "x", "в": "b", "В": "b",
+    "ѕ": "s", "Ѕ": "s", "ԁ": "d", "ԁ".upper(): "d", "ɡ": "g",
+    "α": "a", "ε": "e", "ι": "i", "ο": "o", "ρ": "p", "κ": "k",
+    "μ": "m", "ν": "n", "τ": "t", "χ": "x", "β": "b", "ѕ".upper(): "s",
+})
+
+# Normalized needles (compare against alnum-only, lowercased text)
+_OBFUSCATED_NEEDLES = (
+    "admin123",
+    "skvinbanksecret2024",
+    "dbvinbankinternal",
+    "dbvinbankinternal5432",
+)
+
+
+def _fold_with_map(text: str) -> tuple[str, list[int]]:
+    """Fold confusables char-by-char; return (folded, orig_index_per_folded_char)."""
+    folded_parts: list[str] = []
+    index_map: list[int] = []
+    for i, ch in enumerate(text or ""):
+        f = unicodedata.normalize("NFKC", ch).translate(_CONFUSABLES)
+        for fc in f:
+            folded_parts.append(fc)
+            index_map.append(i)
+    return "".join(folded_parts), index_map
+
+
+def _fold_confusables(text: str) -> str:
+    folded, _ = _fold_with_map(text)
+    return folded
+
+
+def contains_obfuscated_secret(text: str) -> bool:
+    """True if any needle appears after folding + stripping non-alphanumerics."""
+    folded = _fold_confusables(text)
+    flat = re.sub(r"[^a-z0-9]", "", folded.lower())
+    return any(n in flat for n in _OBFUSCATED_NEEDLES)
+
+
+def redact_obfuscated_secrets(text: str) -> str:
+    """Replace the ORIGINAL span of an obfuscated secret with [REDACTED]."""
+    folded, index_map = _fold_with_map(text)
+    chars = [(m.group(0).lower(), m.start()) for m in re.finditer(r"[a-z0-9]", folded, re.IGNORECASE)]
+    flat = "".join(c for c, _ in chars)
+    spans: list[tuple[int, int]] = []
+    for needle in _OBFUSCATED_NEEDLES:
+        start = 0
+        while True:
+            i = flat.find(needle, start)
+            if i < 0:
+                break
+            s_fold, e_fold = chars[i][1], chars[i + len(needle) - 1][1] + 1
+            # map folded indices back to original text (folded is 1-1 here, but be safe)
+            s_orig = index_map[s_fold] if s_fold < len(index_map) else len(text or "")
+            e_fold_idx = min(e_fold - 1, len(index_map) - 1)
+            e_orig = (index_map[e_fold_idx] + 1) if index_map else len(text or "")
+            spans.append((s_orig, e_orig))
+            start = i + 1
+    if not spans:
+        return text
+    spans.sort()
+    merged: list[list[int]] = [[spans[0][0], spans[0][1]]]
+    for s, e in spans[1:]:
+        if s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    out, prev = [], 0
+    for s, e in merged:
+        out.append((text or "")[prev:s])
+        out.append("[REDACTED]")
+        prev = e
+    out.append((text or "")[prev:])
+    return "".join(out)
 
 
 # ============================================================
@@ -53,8 +144,15 @@ def content_filter(response: str) -> dict:
         "admin_pw": r"\badmin123\b",
     }
 
+    # Obfuscated secrets FIRST (spaced / dashed / homoglyph): normalize, then
+    # redact the original span — plain-secret regexes would otherwise fragment
+    # "sk-vinbаnk-secret-2024" into pieces that dodge the full-needle match.
+    if contains_obfuscated_secret(response):
+        issues.append("obfuscated_secret: found")
+        redacted = redact_obfuscated_secrets(response)
+
     for name, pattern in PII_PATTERNS.items():
-        matches = re.findall(pattern, response, re.IGNORECASE)
+        matches = re.findall(pattern, redacted, re.IGNORECASE)
         if matches:
             issues.append(f"{name}: {len(matches)} found")
             redacted = re.sub(pattern, "[REDACTED]", redacted, flags=re.IGNORECASE)
