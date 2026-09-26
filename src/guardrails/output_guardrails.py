@@ -47,6 +47,8 @@ def content_filter(response: str) -> dict:
         "api_key": r"sk-[a-zA-Z0-9\-_]+",
         "password": r"password\s*[:=]\s*\S+",
         "password_vi": r"mật\s*khẩu\s*[:=]\s*\S+",
+        "api_key_is": r"api\s*key\s+(is\s+)?\S+",
+        "connection_str": r"connection\s+string",
         "db_host": r"[a-z0-9\-]+\.internal(?::\d+)?",
         "admin_pw": r"\badmin123\b",
     }

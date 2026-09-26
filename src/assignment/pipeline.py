@@ -37,6 +37,8 @@ SECRET_PATTERNS = (
     r"[a-z0-9\-]+\.internal(?::\d+)?",
     r"password\s*[:=]\s*\S+",
     r"mật\s*khẩu\s*[:=]\s*\S+",
+    r"api\s*key\s+(is\s+)?\S+",
+    r"connection\s+string",
     r"\b0\d{9,10}\b",
     r"[\w\.-]+@[\w\.-]+\.[a-zA-Z]{2,}",
 )
